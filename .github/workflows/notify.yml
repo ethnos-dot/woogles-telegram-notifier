@@ -1,0 +1,48 @@
+name: woogles-telegram-notifier
+
+on:
+  schedule:
+    # Every 30 minutes. Stays comfortably under the 2,000 free Actions
+    # minutes/month for a PRIVATE repo. If you make the repo PUBLIC (Actions
+    # minutes are unlimited for public repos) you can drop this to "*/5 * * * *".
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {} # lets you run it manually from the Actions tab
+
+# Allow the job to commit the updated state.json back to the repo.
+permissions:
+  contents: write
+
+# Never let two runs race on the state commit.
+concurrency:
+  group: woogles-notifier
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check Woogles and notify
+        env:
+          WOOGLES_USERNAME: ${{ secrets.WOOGLES_USERNAME }}
+          WOOGLES_PASSWORD: ${{ secrets.WOOGLES_PASSWORD }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python woogles_notify.py --once
+
+      - name: Persist state
+        run: |
+          if [ -n "$(git status --porcelain state.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add state.json
+            git commit -m "Update notifier state [skip ci]"
+            git push
+          else
+            echo "No state change."
+          fi
