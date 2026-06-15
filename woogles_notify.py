@@ -2,8 +2,9 @@
 """Woogles -> Telegram notifier.
 
 Polls your Woogles correspondence games and sends a Telegram message when:
-  * it becomes your turn in a game, or
-  * a game you were playing finishes.
+  * it becomes your turn (with the time left on your clock),
+  * a game you were playing finishes, or
+  * analysis you requested on a recent game becomes ready.
 
 Designed to run statelessly on a schedule (e.g. GitHub Actions cron). State is
 kept in state.json between runs so we only notify on *changes*.
@@ -21,6 +22,7 @@ import http.cookiejar
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -36,10 +38,15 @@ BASE = "https://woogles.io"
 LOGIN_URL = BASE + "/api/user_service.AuthenticationService/Login"
 ACTIVE_URL = BASE + "/api/game_service.GameMetadataService/GetActiveCorrespondenceGames"
 META_URL = BASE + "/api/game_service.GameMetadataService/GetMetadata"
+RECENT_URL = BASE + "/api/game_service.GameMetadataService/GetRecentGames"
+DOC_URL = BASE + "/api/game_service.GameMetadataService/GetGameDocument"
+ANALYSIS_STATUS_URL = BASE + "/api/analysis_service.AnalysisService/GetGamesAnalysisStatus"
 GAME_LINK = BASE + "/game/{}"
 
 STATE_FILE = os.environ.get("STATE_FILE", "state.json")
 USER_AGENT = "woogles-telegram-notifier/1.0 (personal turn notifier)"
+RECENT_GAMES_TO_SCAN = 25   # how many recent finished games to check for analysis
+ANALYZED_HISTORY_CAP = 300  # cap on remembered analyzed game ids
 
 
 # --------------------------------------------------------------------------- #
@@ -79,6 +86,21 @@ def post_json(opener, url, payload):
     return json.loads(body) if body.strip() else {}
 
 
+def fmt_duration(ms):
+    """Human-friendly clock remaining, e.g. '2d 4h', '5h 12m', '8m'."""
+    if ms <= 0:
+        return "time almost up!"
+    secs = ms // 1000
+    days, secs = divmod(secs, 86400)
+    hours, secs = divmod(secs, 3600)
+    mins, _ = divmod(secs, 60)
+    if days:
+        return f"{days}d {hours}h"
+    if hours:
+        return f"{hours}h {mins}m"
+    return f"{mins}m"
+
+
 # --------------------------------------------------------------------------- #
 # Woogles
 # --------------------------------------------------------------------------- #
@@ -112,6 +134,30 @@ def opponent(game, me):
     return "opponent"
 
 
+def time_bank_left(opener, gid, me):
+    """Live time remaining on MY clock for a game where it's my turn.
+    Returns a formatted string, or None if it can't be determined."""
+    try:
+        resp = post_json(opener, DOC_URL, {"gameId": gid})
+        doc = resp.get("document") or resp
+        players = doc.get("players") or []
+        idx = next(
+            (i for i, p in enumerate(players) if (p.get("nickname") or "").lower() == me.lower()),
+            None,
+        )
+        timers = doc.get("timers") or {}
+        remaining = pick(timers, "timeRemaining", "time_remaining") or []
+        last_update = pick(timers, "timeOfLastUpdate", "time_of_last_update")
+        if idx is None or idx >= len(remaining) or last_update is None:
+            return None
+        # It's my turn, so my clock is ticking: subtract elapsed since last update.
+        elapsed = int(time.time() * 1000) - int(last_update)
+        return fmt_duration(int(remaining[idx]) - elapsed)
+    except Exception as exc:  # never let the clock lookup break a notification
+        print("WARN time-bank lookup failed for", gid, "->", exc)
+        return None
+
+
 def fetch_result(opener, gid, me):
     """Look up a finished game's outcome. Returns a label string, or None if the
     game does not actually appear finished (so we avoid false 'finished' alerts)."""
@@ -135,6 +181,44 @@ def fetch_result(opener, gid, me):
     if winner is None or my_idx is None or winner < 0:
         return f"ended{score_str}"
     return (f"you won{score_str} \U0001F389" if winner == my_idx else f"you lost{score_str}")
+
+
+def check_analyses(opener, me, prev_analyzed, seed_only):
+    """Detect newly-completed analyses among recent finished games.
+    Returns (messages, updated_analyzed_list)."""
+    try:
+        recent = post_json(
+            opener, RECENT_URL, {"username": me, "numGames": RECENT_GAMES_TO_SCAN, "offset": 0}
+        )
+        infos = pick(recent, "gameInfo", "game_info") or []
+    except Exception as exc:
+        print("WARN recent-games fetch failed ->", exc)
+        return [], prev_analyzed
+    id_to_opp = {}
+    for g in infos:
+        gid = pick(g, "gameId", "game_id")
+        if gid:
+            id_to_opp[gid] = opponent(g, me)
+    if not id_to_opp:
+        return [], prev_analyzed
+    try:
+        status = post_json(opener, ANALYSIS_STATUS_URL, {"gameIds": list(id_to_opp)})
+        analyzed_now = pick(status, "analyzedGameIds", "analyzed_game_ids") or []
+    except Exception as exc:
+        print("WARN analysis-status fetch failed ->", exc)
+        return [], prev_analyzed
+    analyzed_now = [a for a in analyzed_now if a in id_to_opp]  # only recent ones
+    prev_set = set(prev_analyzed or [])
+    messages = []
+    if not seed_only:
+        for gid in analyzed_now:
+            if gid not in prev_set:
+                messages.append(
+                    f"\U0001F4CA Analysis ready — your game vs {id_to_opp.get(gid, 'opponent')}"
+                    f"\n{GAME_LINK.format(gid)}"
+                )
+    merged = list(analyzed_now) + [g for g in (prev_analyzed or []) if g not in set(analyzed_now)]
+    return messages, merged[:ANALYZED_HISTORY_CAP]
 
 
 # --------------------------------------------------------------------------- #
@@ -182,15 +266,16 @@ def cmd_get_chat_id(token):
 # state
 # --------------------------------------------------------------------------- #
 def load_state():
+    default = {"initialized": False, "games": {}, "analyzed": [], "analysisInitialized": False}
     if not os.path.exists(STATE_FILE):
-        return {"initialized": False, "games": {}}
+        return default
     try:
         with open(STATE_FILE, encoding="utf-8") as fh:
             data = json.load(fh)
     except (json.JSONDecodeError, OSError):
-        return {"initialized": False, "games": {}}
-    data.setdefault("initialized", False)
-    data.setdefault("games", {})
+        return default
+    for k, v in default.items():
+        data.setdefault(k, v)
     return data
 
 
@@ -227,7 +312,11 @@ def run_once(me, password, token, chat_id):
 
         was_on_turn = prev.get(gid, {}).get("onTurn", False)
         if mine and not was_on_turn and not first_run:
-            messages.append(f"\U0001F3AF Your move vs {opp}\n{GAME_LINK.format(gid)}")
+            msg = f"\U0001F3AF Your move vs {opp}"
+            left = time_bank_left(opener, gid, me)
+            if left:
+                msg += f"\n⏳ {left} left on your clock"
+            messages.append(msg + f"\n{GAME_LINK.format(gid)}")
 
     # games that left the active list -> likely finished
     if not first_run:
@@ -240,6 +329,12 @@ def run_once(me, password, token, chat_id):
                         f"\U0001F3C1 Game vs {opp} finished — {result}\n{GAME_LINK.format(gid)}"
                     )
 
+    # analysis-ready detection (seeded silently the first time it runs)
+    seed_analysis = not state.get("analysisInitialized")
+    analysis_msgs, analyzed = check_analyses(opener, me, state.get("analyzed", []), seed_analysis)
+    if not seed_analysis:
+        messages.extend(analysis_msgs)
+
     waiting = sum(1 for v in new_games.values() if v["onTurn"])
     if first_run:
         messages.append(
@@ -251,7 +346,14 @@ def run_once(me, password, token, chat_id):
         tg_send(token, chat_id, text)
         print("SENT:", text.splitlines()[0])
 
-    save_state({"initialized": True, "games": new_games})
+    save_state(
+        {
+            "initialized": True,
+            "games": new_games,
+            "analyzed": analyzed,
+            "analysisInitialized": True,
+        }
+    )
     print(
         f"OK: {len(new_games)} active game(s), {waiting} on your turn, "
         f"{len(messages)} notification(s) sent."
