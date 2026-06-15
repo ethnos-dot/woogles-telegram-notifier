@@ -1,4 +1,26 @@
 {
+  "analysisInitialized": true,
+  "analyzed": [
+    "bTDq3j92eF",
+    "tGo79ob95G",
+    "wvstqM5QYp",
+    "k7pJwwYVJt",
+    "TJ4fRFFt9G",
+    "Bbd8AyXDmT",
+    "hPLmcFpE7e",
+    "BZxv2vEeZg",
+    "NfHuoKn3D8",
+    "QhXFmBM5JW",
+    "XF2H8fBmxT",
+    "7r46cvdALt",
+    "SMZFYmznGj",
+    "CtS6tEpWbi",
+    "TKJeCuanZu",
+    "hSBjwZRUD3",
+    "fxEU4aWr6e",
+    "gkQuGYbQtH",
+    "Ni8y2Qp6Mc"
+  ],
   "games": {
     "7kqqC7oBcH": {
       "lastUpdate": "2026-06-15T06:01:50.041Z",
@@ -16,13 +38,13 @@
       "opp": "Rinnegone"
     },
     "JUQCDoAH2p": {
-      "lastUpdate": "2026-06-15T06:00:11.080Z",
-      "onTurn": false,
+      "lastUpdate": "2026-06-15T22:26:44.805Z",
+      "onTurn": true,
       "opp": "K2O"
     },
     "jxYeM7ifGu": {
-      "lastUpdate": "2026-06-15T11:35:00.315Z",
-      "onTurn": true,
+      "lastUpdate": "2026-06-15T20:48:48.237Z",
+      "onTurn": false,
       "opp": "MSHS-21ASHERFOO"
     },
     "vAiPVn28PX": {
