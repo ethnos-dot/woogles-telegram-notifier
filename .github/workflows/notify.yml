@@ -2,10 +2,10 @@ name: woogles-telegram-notifier
 
 on:
   schedule:
-    # Every 5 minutes. This needs UNLIMITED Actions minutes, which you only get
-    # on a PUBLIC repo. On a private repo this would exhaust the ~2,000 free
-    # minutes/month in about a week -- bump to "*/30 * * * *" if you go private.
-    - cron: "*/5 * * * *"
+    # Every 10 minutes. Public repos get unlimited Actions minutes, so this is
+    # free. On a private repo, even 10-min exceeds the ~2,000 free minutes/month
+    # -- use "*/30 * * * *" if you switch to private.
+    - cron: "*/10 * * * *"
   workflow_dispatch: {} # lets you run it manually from the Actions tab
 
 # Allow the job to commit the updated state.json back to the repo.

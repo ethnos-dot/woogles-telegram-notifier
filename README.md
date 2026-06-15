@@ -57,7 +57,7 @@ run `py woogles_notify.py --get-chat-id`.)
 
 ### 3. Put this folder in a GitHub repo
 
-A **public** repo is recommended if you want 5-minute checks (public repos get
+A **public** repo is recommended if you want frequent (10-minute) checks (public repos get
 unlimited free Actions minutes; your secrets stay encrypted, only `state.json` is
 visible). Use `--private` if you'd rather keep it private and check less often.
 With the [GitHub CLI](https://cli.github.com/):
@@ -90,7 +90,7 @@ Go to the **Actions** tab → enable workflows if prompted → open
 **woogles-telegram-notifier** → **Run workflow** to trigger the first run
 manually. You should get a "✅ Woogles notifier is live" message in Telegram.
 
-After that it runs **every 5 minutes** automatically.
+After that it runs **every 10 minutes** automatically.
 
 ---
 
@@ -110,12 +110,12 @@ py woogles_notify.py --once          # one real poll cycle (writes state.json)
 
 ## Good to know (GitHub Actions specifics)
 
-- **Minutes:** this repo runs every **5 minutes**, which relies on the
+- **Minutes:** this repo runs every **10 minutes**, which relies on the
   **unlimited** Actions minutes you get on a **public** repo. If you switch it to
   private, drop the cron in
   [`.github/workflows/notify.yml`](.github/workflows/notify.yml) to `*/30 * * * *`
-  (every 5 min on a private repo would burn the ~2,000 free minutes/month in about
-  a week). Either way your 4 secrets stay encrypted; only `state.json` (game ids,
+  (even 10-min on a private repo would blow past the ~2,000 free minutes/month).
+  Either way your 4 secrets stay encrypted; only `state.json` (game ids,
   opponents, turn flags) is visible on a public repo.
 - **60-day rule:** GitHub auto-disables *scheduled* workflows after 60 days with
   no **human** commits (the bot's `state.json` commits don't count). Every couple
