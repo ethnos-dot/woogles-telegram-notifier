@@ -1,1 +1,35 @@
-{}
+{
+  "games": {
+    "7kqqC7oBcH": {
+      "lastUpdate": "2026-06-15T06:01:50.041Z",
+      "onTurn": false,
+      "opp": "CynicalAd"
+    },
+    "8jnyW8bKje": {
+      "lastUpdate": "2026-06-15T06:07:42.693Z",
+      "onTurn": false,
+      "opp": "ChickenNugget99"
+    },
+    "BmH2rHz6KW": {
+      "lastUpdate": "2026-06-15T11:54:56.359Z",
+      "onTurn": true,
+      "opp": "Rinnegone"
+    },
+    "JUQCDoAH2p": {
+      "lastUpdate": "2026-06-15T06:00:11.080Z",
+      "onTurn": false,
+      "opp": "K2O"
+    },
+    "jxYeM7ifGu": {
+      "lastUpdate": "2026-06-15T11:35:00.315Z",
+      "onTurn": true,
+      "opp": "MSHS-21ASHERFOO"
+    },
+    "vAiPVn28PX": {
+      "lastUpdate": "2026-06-13T09:29:54.844Z",
+      "onTurn": false,
+      "opp": "ndroo"
+    }
+  },
+  "initialized": true
+}
