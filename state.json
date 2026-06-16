@@ -1,7 +1,6 @@
 {
   "analysisInitialized": true,
   "analyzed": [
-    "bTDq3j92eF",
     "tGo79ob95G",
     "wvstqM5QYp",
     "k7pJwwYVJt",
@@ -20,7 +19,8 @@
     "fxEU4aWr6e",
     "gkQuGYbQtH",
     "Ni8y2Qp6Mc",
-    "JUQCDoAH2p"
+    "JUQCDoAH2p",
+    "bTDq3j92eF"
   ],
   "games": {
     "7kqqC7oBcH": {
@@ -40,12 +40,6 @@
       "lastUpdate": "2026-06-16T12:23:58.096Z",
       "onTurn": false,
       "opp": "Rinnegone"
-    },
-    "jxYeM7ifGu": {
-      "lastNotified": null,
-      "lastUpdate": "2026-06-16T15:48:31.337Z",
-      "onTurn": false,
-      "opp": "MSHS-21ASHERFOO"
     },
     "vAiPVn28PX": {
       "lastNotified": null,
