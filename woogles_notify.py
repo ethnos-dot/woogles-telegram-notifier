@@ -47,6 +47,7 @@ STATE_FILE = os.environ.get("STATE_FILE", "state.json")
 USER_AGENT = "woogles-telegram-notifier/1.0 (personal turn notifier)"
 RECENT_GAMES_TO_SCAN = 25   # how many recent finished games to check for analysis
 ANALYZED_HISTORY_CAP = 300  # cap on remembered analyzed game ids
+REMINDER_INTERVAL_SECONDS = 2 * 60 * 60  # re-ping a standing "your turn" every 2h
 
 
 # --------------------------------------------------------------------------- #
@@ -300,6 +301,7 @@ def run_once(me, password, token, chat_id):
     messages = []
     active_ids = set()
 
+    now = int(time.time())
     for g in games:
         gid = pick(g, "gameId", "game_id")
         if not gid:
@@ -308,15 +310,35 @@ def run_once(me, password, token, chat_id):
         mine = my_turn(g, me)
         opp = opponent(g, me)
         last_update = pick(g, "lastUpdate", "last_update", default="")
-        new_games[gid] = {"onTurn": bool(mine), "lastUpdate": last_update, "opp": opp}
+        prev_game = prev.get(gid, {})
+        was_on_turn = prev_game.get("onTurn", False)
+        last_notified = prev_game.get("lastNotified")
+        notified_at = None
 
-        was_on_turn = prev.get(gid, {}).get("onTurn", False)
-        if mine and not was_on_turn and not first_run:
-            msg = f"\U0001F3AF Your move vs {opp}"
-            left = time_bank_left(opener, gid, me)
-            if left:
-                msg += f"\n⏳ {left} left on your clock"
-            messages.append(msg + f"\n{GAME_LINK.format(gid)}")
+        if mine:
+            if first_run:
+                # seed silently, but start the 2h reminder clock now
+                notified_at = now
+            else:
+                fresh = not was_on_turn
+                due = last_notified is None or (now - last_notified) >= REMINDER_INTERVAL_SECONDS
+                if fresh or due:
+                    head = "\U0001F3AF Your move vs " if fresh else "⏰ Still your move vs "
+                    msg = head + opp
+                    left = time_bank_left(opener, gid, me)
+                    if left:
+                        msg += f"\n⏳ {left} left on your clock"
+                    messages.append(msg + f"\n{GAME_LINK.format(gid)}")
+                    notified_at = now
+                else:
+                    notified_at = last_notified  # standing turn, reminder not due yet
+
+        new_games[gid] = {
+            "onTurn": bool(mine),
+            "lastUpdate": last_update,
+            "opp": opp,
+            "lastNotified": notified_at,
+        }
 
     # games that left the active list -> likely finished
     if not first_run:

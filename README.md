@@ -4,6 +4,7 @@ Sends you a Telegram message when something happens in your **Woogles
 correspondence games**:
 
 - 🎯 **it becomes your turn** (with the time left on your clock),
+- ⏰ **a reminder every 2h** while a game is still waiting on your move,
 - 🏁 **a game finishes** (with the result), or
 - 📊 **analysis you requested becomes ready**.
 
@@ -22,9 +23,11 @@ pinged on *changes*.
 
 1. Logs into Woogles with your username/password → gets a session cookie.
 2. Calls `GetActiveCorrespondenceGames` to list your active async games.
-3. For each game checks `player_on_turn`; if that player is **you**, and it
-   wasn't your turn last time, it sends a Telegram message (with the clock left
-   from `GetGameDocument`) linking to the game.
+3. For each game checks `player_on_turn`; if that player is **you**, it sends a
+   Telegram message (with the clock left from `GetGameDocument`) linking to the
+   game — on the first flip to your turn, then again every 2h while it stays your
+   turn (tracked per game via `lastNotified` in state; tune with
+   `REMINDER_INTERVAL_SECONDS`).
 4. If a tracked game dropped off the active list, it looks up the result and
    sends a "finished" message.
 5. Checks recent finished games against `GetGamesAnalysisStatus`; when one newly
@@ -120,8 +123,39 @@ py woogles_notify.py --once          # one real poll cycle (writes state.json)
 - **60-day rule:** GitHub auto-disables *scheduled* workflows after 60 days with
   no **human** commits (the bot's `state.json` commits don't count). Every couple
   months, push any commit or click **Enable** on the workflow to keep it alive.
-- **Timing:** scheduled runs can be delayed 5–20 min under GitHub load. Fine for
-  correspondence games.
+- **Timing:** GitHub heavily throttles `schedule` triggers — in practice runs can
+  land **hours** apart, not on your cron. For tight, reliable timing use an
+  external trigger (next section); manual/API dispatches are *not* throttled.
+
+---
+
+## Reliable timing (external trigger)
+
+GitHub's `schedule` cron is best-effort and often runs hours late. To get
+dependable ~10-minute checks, have a free external scheduler call GitHub's
+**workflow-dispatch API** (those dispatches run immediately — no throttling).
+
+**1. Create a fine-grained GitHub token**
+- GitHub → Settings → Developer settings → **Fine-grained tokens** → Generate new.
+- **Repository access:** only `woogles-telegram-notifier`.
+- **Permissions:** Repository → **Actions: Read and write**. Nothing else.
+- Set an expiry, generate, and copy the token (starts with `github_pat_`).
+
+**2. Create the scheduled call at [cron-job.org](https://cron-job.org)** (free)
+- New cronjob, schedule **every 10 minutes**.
+- **URL:** `https://api.github.com/repos/ethnos-dot/woogles-telegram-notifier/actions/workflows/notify.yml/dispatches`
+- **Method:** `POST`
+- **Headers:**
+  - `Authorization: Bearer <your github_pat_… token>`
+  - `Accept: application/vnd.github+json`
+  - `Content-Type: application/json`
+- **Body:** `{"ref":"main"}`
+- Save. A successful call returns HTTP **204**, and a `workflow_dispatch` run
+  appears in the Actions tab within seconds.
+
+The built-in `schedule:` trigger stays as a free backup; overlapping runs are
+serialized by the workflow's `concurrency` group, and state-dedup means no double
+pings. Paste the token into cron-job.org only — never commit it.
 
 ---
 
