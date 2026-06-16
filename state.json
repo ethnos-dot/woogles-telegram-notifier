@@ -43,14 +43,14 @@
     },
     "jxYeM7ifGu": {
       "lastNotified": 1781621441,
-      "lastUpdate": "2026-06-16T12:40:59.497Z",
+      "lastUpdate": "2026-06-16T14:59:59.876Z",
       "onTurn": true,
       "opp": "MSHS-21ASHERFOO"
     },
     "vAiPVn28PX": {
-      "lastNotified": 1781620245,
-      "lastUpdate": "2026-06-16T14:21:56.279Z",
-      "onTurn": true,
+      "lastNotified": null,
+      "lastUpdate": "2026-06-16T14:56:26.033Z",
+      "onTurn": false,
       "opp": "ndroo"
     }
   },
