@@ -1,7 +1,6 @@
 {
   "analysisInitialized": true,
   "analyzed": [
-    "tGo79ob95G",
     "wvstqM5QYp",
     "k7pJwwYVJt",
     "TJ4fRFFt9G",
@@ -20,6 +19,7 @@
     "gkQuGYbQtH",
     "Ni8y2Qp6Mc",
     "JUQCDoAH2p",
+    "tGo79ob95G",
     "bTDq3j92eF"
   ],
   "games": {
@@ -34,12 +34,6 @@
       "lastUpdate": "2026-06-17T05:17:37.500Z",
       "onTurn": false,
       "opp": "ChickenNugget99"
-    },
-    "BmH2rHz6KW": {
-      "lastNotified": 1781701834,
-      "lastUpdate": "2026-06-17T08:51:02.703Z",
-      "onTurn": true,
-      "opp": "Rinnegone"
     },
     "vAiPVn28PX": {
       "lastNotified": null,
