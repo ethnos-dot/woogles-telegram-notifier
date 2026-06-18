@@ -6,13 +6,13 @@ on:
     # free. On a private repo, even 10-min exceeds the ~2,000 free minutes/month
     # -- use "*/30 * * * *" if you switch to private.
     - cron: "*/10 * * * *"
-  workflow_dispatch: {} # lets you run it manually from the Actions tab
+  workflow_dispatch: {} # manual runs + lets an external cron (cron-job.org) trigger it
 
-# Allow the job to commit the updated state.json back to the repo.
+# State lives in the Actions cache, not committed to the repo, so read-only is enough.
 permissions:
-  contents: write
+  contents: read
 
-# Never let two runs race on the state commit.
+# Never let two runs race on the state cache.
 concurrency:
   group: woogles-notifier
   cancel-in-progress: false
@@ -27,22 +27,29 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Restore the most recent saved state (turn / finished / analysis memory).
+      - name: Restore state
+        uses: actions/cache/restore@v4
+        with:
+          path: state.json
+          key: notifier-state-${{ github.run_id }}
+          restore-keys: |
+            notifier-state-
+
       - name: Check Woogles and notify
         env:
           WOOGLES_USERNAME: ${{ secrets.WOOGLES_USERNAME }}
-          WOOGLES_PASSWORD: ${{ secrets.WOOGLES_PASSWORD }}
+          WOOGLES_API_KEY: ${{ secrets.WOOGLES_API_KEY }} # recommended (Settings → API)
+          WOOGLES_PASSWORD: ${{ secrets.WOOGLES_PASSWORD }} # optional fallback
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python woogles_notify.py --once
 
-      - name: Persist state
-        run: |
-          if [ -n "$(git status --porcelain state.json)" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add state.json
-            git commit -m "Update notifier state [skip ci]"
-            git push
-          else
-            echo "No state change."
-          fi
+      # Save the updated state for the next run (unique key + prefix restore-keys
+      # is the standard pattern, since cache entries are immutable per key).
+      - name: Save state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state.json
+          key: notifier-state-${{ github.run_id }}

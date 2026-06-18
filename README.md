@@ -1,169 +1,143 @@
 # Woogles → Telegram notifier
 
-Sends you a Telegram message when something happens in your **Woogles
-correspondence games**:
+A self-hostable bot that sends **you** a Telegram message when something happens
+in **your** [Woogles](https://woogles.io) correspondence games:
 
 - 🎯 **it becomes your turn** (with the time left on your clock),
 - ⏰ **a reminder every 2h** while a game is still waiting on your move,
 - 🏁 **a game finishes** (with the result), or
 - 📊 **analysis you requested becomes ready**.
 
-It runs free on **GitHub Actions** (a scheduled job in the cloud), so you don't
-need a machine left on. State lives in `state.json` between runs, so you only get
-pinged on *changes*.
+It runs free on **GitHub Actions** — no server, nothing to leave on. Each person
+runs **their own copy** with **their own** Woogles account and Telegram bot;
+nothing is shared and there's no central service.
 
-> Scope: turn/clock/finished alerts cover **correspondence (async)** games — the
-> kind where it's your turn hours or days later. Analysis-ready alerts cover any
-> recent finished game. Incoming **match requests** are *not* included: Woogles
-> only delivers those over a live websocket, which a scheduled job can't poll.
+> ⚠️ **Your Woogles API key is like a password** — it authenticates as you across
+> the whole API. It stays in **your own** repo's encrypted Secrets and is never
+> shared with anyone. (Woogles' own guidance: keep your API key secret.) That's
+> exactly why this is a *self-host* template rather than a hosted sign-up service.
 
 ---
 
-## How it works
+## Use this template
 
-1. Logs into Woogles with your username/password → gets a session cookie.
-2. Calls `GetActiveCorrespondenceGames` to list your active async games.
-3. For each game checks `player_on_turn`; if that player is **you**, it sends a
-   Telegram message (with the clock left from `GetGameDocument`) linking to the
-   game — on the first flip to your turn, then again every 2h while it stays your
-   turn (tracked per game via `lastNotified` in state; tune with
-   `REMINDER_INTERVAL_SECONDS`).
-4. If a tracked game dropped off the active list, it looks up the result and
-   sends a "finished" message.
-5. Checks recent finished games against `GetGamesAnalysisStatus`; when one newly
-   has completed analysis, it sends an "analysis ready" message.
+Click **“Use this template” → Create a new repository** at the top of this repo
+to get your own independent copy (no shared history). Then follow Setup below in
+*your* copy.
 
-All with the Python standard library — **no `pip install`**.
+> *Repo owner:* to show that button, enable **Settings → General → Template
+> repository**.
 
 ---
 
 ## Setup (one time, ~10 minutes)
 
 ### 1. Create your Telegram bot
-
-1. In Telegram, message **@BotFather** → send `/newbot` → follow the prompts.
-2. Copy the **bot token** it gives you (looks like `123456789:AAH...`).
-3. **Send any message to your new bot** (e.g. "hi") so it's allowed to message you.
+In Telegram, message **@BotFather** → `/newbot` → follow the prompts → copy the
+**bot token** (looks like `123456789:AA…`). Then **send your new bot any message**
+(e.g. “hi”) so it’s allowed to message you.
 
 ### 2. Find your Telegram chat id
-
-Easiest: open this URL in a browser (paste your token in):
-
+Open this in a browser (paste your token in):
 ```
 https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates
 ```
+Find `"chat":{"id":123456789,…}` — that number is your `TELEGRAM_CHAT_ID`.
 
-Look for `"chat":{"id":123456789,...}` — that number is your `TELEGRAM_CHAT_ID`.
+### 3. Get your Woogles API key
+On woogles.io: **Settings → API → Generate API key**, click the eye icon, and
+copy it. It’s revocable (regenerate any time) and is **not** your password.
 
-(Or, with Python installed, copy `.env.example` to `.env`, fill in the token, and
-run `py woogles_notify.py --get-chat-id`.)
+### 4. Add your secrets
+In *your* repo: **Settings → Secrets and variables → Actions → New repository
+secret**. Add:
 
-### 3. Put this folder in a GitHub repo
+| Secret name          | Value                                            |
+| -------------------- | ------------------------------------------------ |
+| `WOOGLES_USERNAME`   | your Woogles nickname                            |
+| `WOOGLES_API_KEY`    | the API key from step 3                          |
+| `TELEGRAM_BOT_TOKEN` | the token from step 1                            |
+| `TELEGRAM_CHAT_ID`   | the chat id from step 2                          |
 
-A **public** repo is recommended if you want frequent (10-minute) checks (public repos get
-unlimited free Actions minutes; your secrets stay encrypted, only `state.json` is
-visible). Use `--private` if you'd rather keep it private and check less often.
-With the [GitHub CLI](https://cli.github.com/):
+*(Prefer not to use an API key? You can instead set `WOOGLES_PASSWORD` — less
+safe, since it stores your password. The API key is recommended.)*
 
-```powershell
-cd E:\Claude\woogles-telegram-notifier
-git init
-git add .
-git commit -m "Woogles Telegram notifier"
-gh repo create woogles-telegram-notifier --public --source=. --push
-```
+### 5. Make the repo public (for free 10-min checks)
+Public repos get **unlimited** Actions minutes, so the every-10-minutes schedule
+is free. Your secrets stay encrypted regardless — only the code is visible.
+(Prefer private? Change the cron to `*/30 * * * *` — see Notes.)
 
-(Or create an empty repo on github.com and `git remote add origin ... ; git push -u origin main`.)
+### 6. Turn it on
+**Actions** tab → enable workflows if prompted → open **woogles-telegram-notifier**
+→ **Run workflow**. You’ll get a “✅ notifier is live” message listing how many
+games are waiting on you. After that it runs automatically.
 
-### 4. Add your secrets to the repo
+---
 
-In the repo: **Settings → Secrets and variables → Actions → New repository secret**.
-Add these four (the values are never shown in logs):
+## How it works
 
-| Secret name          | Value                                  |
-| -------------------- | -------------------------------------- |
-| `WOOGLES_USERNAME`   | your Woogles nickname                  |
-| `WOOGLES_PASSWORD`   | your Woogles password                  |
-| `TELEGRAM_BOT_TOKEN` | the token from BotFather               |
-| `TELEGRAM_CHAT_ID`   | the chat id from step 2                |
+1. Authenticates to Woogles with your API key (`X-Api-Key` header).
+2. `GetActiveCorrespondenceGames` lists your active async games; if
+   `player_on_turn` is **you** it messages you (with the clock from
+   `GetGameDocument`) — once on the flip to your turn, then every 2h while it
+   stays your turn.
+3. A tracked game that drops off the active list → looks up the result and sends
+   a “finished” message.
+4. `GetGamesAnalysisStatus` on your recent games → “analysis ready” when one
+   newly completes.
 
-### 5. Turn it on
+State (what it’s already told you) is kept in the **GitHub Actions cache**, not
+committed to the repo — so the repo stays clean and you only ever get pinged on
+*changes*. Standard library only — **no `pip install`**.
 
-Go to the **Actions** tab → enable workflows if prompted → open
-**woogles-telegram-notifier** → **Run workflow** to trigger the first run
-manually. You should get a "✅ Woogles notifier is live" message in Telegram.
+> **Scope:** correspondence (async) games for turn/clock/finished; any recent
+> finished game for analysis. Incoming **match requests** aren’t included —
+> Woogles only delivers those over a live websocket, which a scheduled job
+> can’t poll.
 
-After that it runs **every 10 minutes** automatically.
+---
+
+## Reliable timing (optional but recommended)
+
+GitHub’s `schedule` cron is best-effort and often runs **hours** late. For
+dependable ~10-minute checks, have a free scheduler call GitHub’s
+workflow-dispatch API (manual dispatches aren’t throttled):
+
+1. **Fine-grained GitHub token** — GitHub → Settings → Developer settings →
+   **Fine-grained tokens** → Generate. Repository access: **only this repo**.
+   Permissions: **Actions → Read and write**.
+2. **A free job at [cron-job.org](https://cron-job.org)**, every **10 minutes**:
+   - **POST** to (replace `OWNER/REPO` with yours):
+     `https://api.github.com/repos/OWNER/REPO/actions/workflows/notify.yml/dispatches`
+   - Headers: `Authorization: Bearer <token>`, `Accept: application/vnd.github+json`,
+     `Content-Type: application/json`
+   - Body: `{"ref":"main"}`
+   - A working call returns HTTP **204**. Paste the token into cron-job.org only.
 
 ---
 
 ## Testing locally (optional)
-
-You have Python via the `py` launcher. Copy `.env.example` to `.env`, fill it in, then:
-
-```powershell
-py woogles_notify.py --test          # sends a test Telegram message
-py woogles_notify.py --get-chat-id   # prints chat ids that messaged your bot
-py woogles_notify.py --once          # one real poll cycle (writes state.json)
+With Python installed, copy `.env.example` to `.env`, fill it in, then:
 ```
-
-`.env` is git-ignored, so your password never gets committed.
+python woogles_notify.py --test          # send a test Telegram message
+python woogles_notify.py --get-chat-id   # print chat ids that messaged your bot
+python woogles_notify.py --once          # one real poll cycle
+```
+`.env` and `state.json` are git-ignored.
 
 ---
 
-## Good to know (GitHub Actions specifics)
-
-- **Minutes:** this repo runs every **10 minutes**, which relies on the
-  **unlimited** Actions minutes you get on a **public** repo. If you switch it to
-  private, drop the cron in
-  [`.github/workflows/notify.yml`](.github/workflows/notify.yml) to `*/30 * * * *`
-  (even 10-min on a private repo would blow past the ~2,000 free minutes/month).
-  Either way your 4 secrets stay encrypted; only `state.json` (game ids,
-  opponents, turn flags) is visible on a public repo.
+## Notes & limits
+- **Minutes:** every-10-min relies on the unlimited Actions minutes of a **public**
+  repo. On a private repo use `*/30 * * * *` (10-min would exceed the ~2,000 free
+  minutes/month).
 - **60-day rule:** GitHub auto-disables *scheduled* workflows after 60 days with
-  no **human** commits (the bot's `state.json` commits don't count). Every couple
-  months, push any commit or click **Enable** on the workflow to keep it alive.
-- **Timing:** GitHub heavily throttles `schedule` triggers — in practice runs can
-  land **hours** apart, not on your cron. For tight, reliable timing use an
-  external trigger (next section); manual/API dispatches are *not* throttled.
-
----
-
-## Reliable timing (external trigger)
-
-GitHub's `schedule` cron is best-effort and often runs hours late. To get
-dependable ~10-minute checks, have a free external scheduler call GitHub's
-**workflow-dispatch API** (those dispatches run immediately — no throttling).
-
-**1. Create a fine-grained GitHub token**
-- GitHub → Settings → Developer settings → **Fine-grained tokens** → Generate new.
-- **Repository access:** only `woogles-telegram-notifier`.
-- **Permissions:** Repository → **Actions: Read and write**. Nothing else.
-- Set an expiry, generate, and copy the token (starts with `github_pat_`).
-
-**2. Create the scheduled call at [cron-job.org](https://cron-job.org)** (free)
-- New cronjob, schedule **every 10 minutes**.
-- **URL:** `https://api.github.com/repos/ethnos-dot/woogles-telegram-notifier/actions/workflows/notify.yml/dispatches`
-- **Method:** `POST`
-- **Headers:**
-  - `Authorization: Bearer <your github_pat_… token>`
-  - `Accept: application/vnd.github+json`
-  - `Content-Type: application/json`
-- **Body:** `{"ref":"main"}`
-- Save. A successful call returns HTTP **204**, and a `workflow_dispatch` run
-  appears in the Actions tab within seconds.
-
-The built-in `schedule:` trigger stays as a free backup; overlapping runs are
-serialized by the workflow's `concurrency` group, and state-dedup means no double
-pings. Paste the token into cron-job.org only — never commit it.
-
----
+  no commits. Push any commit, or rely on the external trigger above, to keep it
+  alive.
+- **Revoking access:** regenerate your key at Woogles **Settings → API** (the old
+  one stops working immediately), then update the `WOOGLES_API_KEY` secret.
 
 ## Tuning
-
-- **Check frequency:** edit the `cron:` line in `.github/workflows/notify.yml`.
-- **Message wording / emoji:** edit the `messages.append(...)` lines in
-  `woogles_notify.py` (`run_once`).
-- **If turn detection ever looks inverted** (says "your move" when it's the
-  opponent's), the player index/order assumption is off — check the `my_turn()`
-  function; the first run's Actions log prints what it saw.
+- **Check frequency:** the `cron:` line in `.github/workflows/notify.yml`.
+- **Reminder interval:** `REMINDER_INTERVAL_SECONDS` in `woogles_notify.py`.
+- **Message wording:** the `messages.append(...)` lines in `run_once`.
