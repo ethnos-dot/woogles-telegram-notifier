@@ -48,10 +48,6 @@ USER_AGENT = "woogles-telegram-notifier/1.0 (personal turn notifier)"
 RECENT_GAMES_TO_SCAN = 25   # how many recent finished games to check for analysis
 ANALYZED_HISTORY_CAP = 300  # cap on remembered analyzed game ids
 REMINDER_INTERVAL_SECONDS = 2 * 60 * 60  # re-ping a standing "your turn" every 2h
-API_KEY_HEADER = "X-Api-Key"  # Woogles authenticates API requests via this header
-
-# Headers sent on every request; populated by woogles_auth() in API-key mode.
-_AUTH_HEADERS = {}
 
 
 # --------------------------------------------------------------------------- #
@@ -84,7 +80,7 @@ def post_json(opener, url, payload):
     req = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json", "User-Agent": USER_AGENT, **_AUTH_HEADERS},
+        headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
     )
     with opener.open(req, timeout=30) as resp:
         body = resp.read().decode("utf-8")
@@ -109,18 +105,12 @@ def fmt_duration(ms):
 # --------------------------------------------------------------------------- #
 # Woogles
 # --------------------------------------------------------------------------- #
-def woogles_auth(username, password, api_key):
-    """Authenticate to Woogles. Prefers a personal API key (recommended: revocable
-    and never stores your password); falls back to username/password login.
-    Returns an opener (its cookie jar holds the session in password mode)."""
-    global _AUTH_HEADERS
-    _AUTH_HEADERS = {}
+def woogles_login(username, password):
+    """Log in and return an opener whose cookie jar holds the session cookie.
+    (Woogles' correspondence/game endpoints authenticate by session, not API key.)"""
     opener = urllib.request.build_opener(
         urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
     )
-    if api_key:
-        _AUTH_HEADERS = {API_KEY_HEADER: api_key}
-        return opener
     try:
         post_json(opener, LOGIN_URL, {"username": username, "password": password})
     except urllib.error.HTTPError as err:
@@ -300,8 +290,8 @@ def save_state(state):
 # --------------------------------------------------------------------------- #
 # main poll cycle
 # --------------------------------------------------------------------------- #
-def run_once(me, password, api_key, token, chat_id):
-    opener = woogles_auth(me, password, api_key)
+def run_once(me, password, token, chat_id):
+    opener = woogles_login(me, password)
     resp = post_json(opener, ACTIVE_URL, {})
     games = pick(resp, "gameInfo", "game_info", default=[]) or []
 
@@ -417,15 +407,15 @@ def main():
         print("Test message sent.")
         return
 
-    require_env("WOOGLES_USERNAME", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
-    api_key = os.environ.get("WOOGLES_API_KEY")
-    password = os.environ.get("WOOGLES_PASSWORD")
-    if not api_key and not password:
-        raise SystemExit(
-            "Set WOOGLES_API_KEY (recommended — woogles.io → Settings → API) "
-            "or WOOGLES_PASSWORD."
-        )
-    run_once(os.environ["WOOGLES_USERNAME"], password, api_key, token, chat_id)
+    require_env(
+        "WOOGLES_USERNAME", "WOOGLES_PASSWORD", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"
+    )
+    run_once(
+        os.environ["WOOGLES_USERNAME"],
+        os.environ["WOOGLES_PASSWORD"],
+        token,
+        chat_id,
+    )
 
 
 if __name__ == "__main__":

@@ -12,10 +12,11 @@ It runs free on **GitHub Actions** — no server, nothing to leave on. Each pers
 runs **their own copy** with **their own** Woogles account and Telegram bot;
 nothing is shared and there's no central service.
 
-> ⚠️ **Your Woogles API key is like a password** — it authenticates as you across
-> the whole API. It stays in **your own** repo's encrypted Secrets and is never
-> shared with anyone. (Woogles' own guidance: keep your API key secret.) That's
-> exactly why this is a *self-host* template rather than a hosted sign-up service.
+> ⚠️ **Your Woogles credentials stay in your own repo.** Woogles' game endpoints
+> require a login session, so this uses your **username + password**, stored only
+> in **your** repo's encrypted Secrets and never shared. That's exactly why this
+> is a *self-host* template rather than a hosted sign-up service — you'd never
+> hand your Woogles password to someone else's bot.
 
 ---
 
@@ -44,9 +45,11 @@ https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates
 ```
 Find `"chat":{"id":123456789,…}` — that number is your `TELEGRAM_CHAT_ID`.
 
-### 3. Get your Woogles API key
-On woogles.io: **Settings → API → Generate API key**, click the eye icon, and
-copy it. It’s revocable (regenerate any time) and is **not** your password.
+### 3. Your Woogles login
+The bot signs in as you to read your games. Woogles' game API authenticates by
+**login session**, so a username + password is required (an API key does *not*
+work for these endpoints). You'll add these as Secrets next; they never leave
+your repo.
 
 ### 4. Add your secrets
 In *your* repo: **Settings → Secrets and variables → Actions → New repository
@@ -55,12 +58,9 @@ secret**. Add:
 | Secret name          | Value                                            |
 | -------------------- | ------------------------------------------------ |
 | `WOOGLES_USERNAME`   | your Woogles nickname                            |
-| `WOOGLES_API_KEY`    | the API key from step 3                          |
+| `WOOGLES_PASSWORD`   | your Woogles password                            |
 | `TELEGRAM_BOT_TOKEN` | the token from step 1                            |
 | `TELEGRAM_CHAT_ID`   | the chat id from step 2                          |
-
-*(Prefer not to use an API key? You can instead set `WOOGLES_PASSWORD` — less
-safe, since it stores your password. The API key is recommended.)*
 
 ### 5. Make the repo public (for free 10-min checks)
 Public repos get **unlimited** Actions minutes, so the every-10-minutes schedule
@@ -76,7 +76,7 @@ games are waiting on you. After that it runs automatically.
 
 ## How it works
 
-1. Authenticates to Woogles with your API key (`X-Api-Key` header).
+1. Logs in with your username/password to get a session cookie.
 2. `GetActiveCorrespondenceGames` lists your active async games; if
    `player_on_turn` is **you** it messages you (with the clock from
    `GetGameDocument`) — once on the flip to your turn, then every 2h while it
@@ -134,8 +134,8 @@ python woogles_notify.py --once          # one real poll cycle
 - **60-day rule:** GitHub auto-disables *scheduled* workflows after 60 days with
   no commits. Push any commit, or rely on the external trigger above, to keep it
   alive.
-- **Revoking access:** regenerate your key at Woogles **Settings → API** (the old
-  one stops working immediately), then update the `WOOGLES_API_KEY` secret.
+- **Revoking access:** change your Woogles password (existing sessions stop
+  working), then update the `WOOGLES_PASSWORD` secret.
 
 ## Tuning
 - **Check frequency:** the `cron:` line in `.github/workflows/notify.yml`.
