@@ -8,6 +8,10 @@ in **your** [Woogles](https://woogles.io) correspondence games:
 - 🏁 **a game finishes** (with the result), or
 - 📊 **analysis you requested becomes ready**.
 
+Everything arrives as **one message that updates in place** — each refresh deletes
+the previous message and posts a fresh consolidated one, so your chat stays a
+single live status instead of a growing feed.
+
 It runs free on **GitHub Actions** — no server, nothing to leave on. Each person
 runs **their own copy** with **their own** Woogles account and Telegram bot;
 nothing is shared and there's no central service.
@@ -85,6 +89,12 @@ games are waiting on you. After that it runs automatically.
    a “finished” message.
 4. `GetGamesAnalysisStatus` on your recent games → “analysis ready” when one
    newly completes.
+
+All current alerts are combined into **one consolidated message**; each update
+deletes the previous message (Telegram `deleteMessage`) before posting the new one,
+so only the latest notifier message is ever in your chat. It refreshes when your
+set of pending turns changes, a game finishes, analysis lands, or every 2h while
+turns are waiting — never on clock ticks alone, so it won't re-ping every cycle.
 
 State (what it’s already told you) is kept in the **GitHub Actions cache**, not
 committed to the repo — so the repo stays clean and you only ever get pinged on

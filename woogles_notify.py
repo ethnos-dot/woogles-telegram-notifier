@@ -211,38 +211,56 @@ def check_analyses(opener, me, prev_analyzed, seed_only):
         return [], prev_analyzed
     analyzed_now = [a for a in analyzed_now if a in id_to_opp]  # only recent ones
     prev_set = set(prev_analyzed or [])
-    messages = []
+    events = []  # list of (game_id, opponent) newly analyzed this cycle
     if not seed_only:
         for gid in analyzed_now:
             if gid not in prev_set:
-                messages.append(
-                    f"\U0001F4CA Analysis ready — your game vs {id_to_opp.get(gid, 'opponent')}"
-                    f"\n{GAME_LINK.format(gid)}"
-                )
+                events.append((gid, id_to_opp.get(gid, "opponent")))
     merged = list(analyzed_now) + [g for g in (prev_analyzed or []) if g not in set(analyzed_now)]
-    return messages, merged[:ANALYZED_HISTORY_CAP]
+    return events, merged[:ANALYZED_HISTORY_CAP]
 
 
 # --------------------------------------------------------------------------- #
 # Telegram
 # --------------------------------------------------------------------------- #
-def tg_send(token, chat_id, text):
+def esc(s):
+    """Escape text for Telegram HTML parse mode."""
+    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def tg_send(token, chat_id, text, parse_mode=None):
+    """Send a Telegram message; returns its message_id (for later deletion)."""
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "disable_web_page_preview": True,
-    }
+    payload = {"chat_id": chat_id, "text": text, "disable_web_page_preview": True}
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url, data=data, headers={"Content-Type": "application/json"}
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            json.loads(resp.read().decode("utf-8"))
+            result = json.loads(resp.read().decode("utf-8"))
+        return (result.get("result") or {}).get("message_id")
     except urllib.error.HTTPError as err:
         detail = err.read().decode("utf-8", "replace")
         raise SystemExit(f"Telegram send failed (HTTP {err.code}): {detail}")
+
+
+def tg_delete(token, chat_id, message_id):
+    """Delete a previously-sent message. Ignores failures (e.g. message >48h old)."""
+    if not message_id:
+        return
+    url = f"https://api.telegram.org/bot{token}/deleteMessage"
+    data = json.dumps({"chat_id": chat_id, "message_id": message_id}).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            resp.read()
+    except Exception:
+        pass  # too old / already gone — not fatal
 
 
 def cmd_get_chat_id(token):
@@ -268,7 +286,10 @@ def cmd_get_chat_id(token):
 # state
 # --------------------------------------------------------------------------- #
 def load_state():
-    default = {"initialized": False, "games": {}, "analyzed": [], "analysisInitialized": False}
+    default = {
+        "initialized": False, "games": {}, "analyzed": [], "analysisInitialized": False,
+        "messageId": None, "lastSentAt": 0, "turnSig": "",
+    }
     if not os.path.exists(STATE_FILE):
         return default
     try:
@@ -290,6 +311,30 @@ def save_state(state):
 # --------------------------------------------------------------------------- #
 # main poll cycle
 # --------------------------------------------------------------------------- #
+def build_message(opener, me, my_turn_games, finished, analysis_events, first_run):
+    """Compose the single consolidated status message (Telegram HTML)."""
+    lines = []
+    if my_turn_games:
+        lines.append(f"\U0001F3AF <b>Your move — {len(my_turn_games)} game(s)</b>")
+        for gid, opp in my_turn_games:
+            left = time_bank_left(opener, gid, me)
+            clock = f" — ⏳ {esc(left)}" if left else ""
+            lines.append(f'• <a href="{GAME_LINK.format(gid)}">vs {esc(opp)}</a>{clock}')
+    else:
+        lines.append("✅ <b>Nothing waiting on you right now.</b>")
+    for gid, opp, result in finished:
+        lines.append(
+            f'\U0001F3C1 Finished: <a href="{GAME_LINK.format(gid)}">vs {esc(opp)}</a> — {esc(result)}'
+        )
+    for gid, opp in analysis_events:
+        lines.append(
+            f'\U0001F4CA Analysis ready: <a href="{GAME_LINK.format(gid)}">vs {esc(opp)}</a>'
+        )
+    if first_run:
+        lines.append("\n<i>Woogles notifier is live.</i>")
+    return "\n".join(lines)
+
+
 def run_once(me, password, token, chat_id):
     opener = woogles_login(me, password)
     resp = post_json(opener, ACTIVE_URL, {})
@@ -299,10 +344,9 @@ def run_once(me, password, token, chat_id):
     first_run = not state.get("initialized")
     prev = state.get("games", {})
     new_games = {}
-    messages = []
     active_ids = set()
+    my_turn_games = []  # (game_id, opponent) where it's currently my move
 
-    now = int(time.time())
     for g in games:
         gid = pick(g, "gameId", "game_id")
         if not gid:
@@ -310,64 +354,53 @@ def run_once(me, password, token, chat_id):
         active_ids.add(gid)
         mine = my_turn(g, me)
         opp = opponent(g, me)
-        last_update = pick(g, "lastUpdate", "last_update", default="")
-        prev_game = prev.get(gid, {})
-        was_on_turn = prev_game.get("onTurn", False)
-        last_notified = prev_game.get("lastNotified")
-        notified_at = None
-
-        if mine:
-            if first_run:
-                # seed silently, but start the 2h reminder clock now
-                notified_at = now
-            else:
-                fresh = not was_on_turn
-                due = last_notified is None or (now - last_notified) >= REMINDER_INTERVAL_SECONDS
-                if fresh or due:
-                    head = "\U0001F3AF Your move vs " if fresh else "⏰ Still your move vs "
-                    msg = head + opp
-                    left = time_bank_left(opener, gid, me)
-                    if left:
-                        msg += f"\n⏳ {left} left on your clock"
-                    messages.append(msg + f"\n{GAME_LINK.format(gid)}")
-                    notified_at = now
-                else:
-                    notified_at = last_notified  # standing turn, reminder not due yet
-
         new_games[gid] = {
             "onTurn": bool(mine),
-            "lastUpdate": last_update,
+            "lastUpdate": pick(g, "lastUpdate", "last_update", default=""),
             "opp": opp,
-            "lastNotified": notified_at,
         }
+        if mine:
+            my_turn_games.append((gid, opp))
 
     # games that left the active list -> likely finished
+    finished = []
     if not first_run:
         for gid, info in prev.items():
             if gid not in active_ids:
                 result = fetch_result(opener, gid, me)
                 if result:
-                    opp = info.get("opp", "opponent")
-                    messages.append(
-                        f"\U0001F3C1 Game vs {opp} finished — {result}\n{GAME_LINK.format(gid)}"
-                    )
+                    finished.append((gid, info.get("opp", "opponent"), result))
 
     # analysis-ready detection (seeded silently the first time it runs)
     seed_analysis = not state.get("analysisInitialized")
-    analysis_msgs, analyzed = check_analyses(opener, me, state.get("analyzed", []), seed_analysis)
-    if not seed_analysis:
-        messages.extend(analysis_msgs)
+    analysis_events, analyzed = check_analyses(opener, me, state.get("analyzed", []), seed_analysis)
 
-    waiting = sum(1 for v in new_games.values() if v["onTurn"])
-    if first_run:
-        messages.append(
-            f"✅ Woogles notifier is live. Tracking {len(new_games)} active "
-            f"correspondence game(s); {waiting} waiting on you."
-        )
+    # One rolling message: refresh it (delete old, send new) when the SET of
+    # your-turn games changes, a game finished, analysis became ready, or every
+    # REMINDER_INTERVAL_SECONDS while turns are still pending. We deliberately do
+    # NOT refresh on clock ticks alone, so it won't re-ping every cycle.
+    now = int(time.time())
+    turn_sig = ",".join(sorted(gid for gid, _ in my_turn_games))
+    prev_msg_id = state.get("messageId")
+    last_sent_at = state.get("lastSentAt", 0)
+    reminder_due = bool(my_turn_games) and (now - last_sent_at) >= REMINDER_INTERVAL_SECONDS
+    should_send = (
+        first_run
+        or turn_sig != state.get("turnSig", "")
+        or bool(finished)
+        or bool(analysis_events)
+        or reminder_due
+    )
 
-    for text in messages:
-        tg_send(token, chat_id, text)
-        print("SENT:", text.splitlines()[0])
+    if should_send:
+        text = build_message(opener, me, my_turn_games, finished, analysis_events, first_run)
+        tg_delete(token, chat_id, prev_msg_id)  # remove the previous rolling message
+        message_id = tg_send(token, chat_id, text, parse_mode="HTML")
+        sent_at = now
+        print("SENT consolidated update; message_id:", message_id)
+    else:
+        message_id = prev_msg_id
+        sent_at = last_sent_at
 
     save_state(
         {
@@ -375,11 +408,14 @@ def run_once(me, password, token, chat_id):
             "games": new_games,
             "analyzed": analyzed,
             "analysisInitialized": True,
+            "messageId": message_id,
+            "lastSentAt": sent_at,
+            "turnSig": turn_sig,
         }
     )
     print(
-        f"OK: {len(new_games)} active game(s), {waiting} on your turn, "
-        f"{len(messages)} notification(s) sent."
+        f"OK: {len(new_games)} active, {len(my_turn_games)} on your turn, "
+        f"finished={len(finished)}, analysis={len(analysis_events)}, sent={should_send}"
     )
 
 
