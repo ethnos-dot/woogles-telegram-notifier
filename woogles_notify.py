@@ -394,8 +394,10 @@ def run_once(me, password, token, chat_id):
 
     if should_send:
         text = build_message(opener, me, my_turn_games, finished, analysis_events, first_run)
-        tg_delete(token, chat_id, prev_msg_id)  # remove the previous rolling message
+        # Send the new message FIRST, then delete the old one — so a send failure
+        # never leaves you with no message, and there's no zero-message window.
         message_id = tg_send(token, chat_id, text, parse_mode="HTML")
+        tg_delete(token, chat_id, prev_msg_id)
         sent_at = now
         print("SENT consolidated update; message_id:", message_id)
     else:
